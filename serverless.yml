@@ -1,0 +1,52 @@
+service: eb-sqs-demo
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  iam: # permission for lambda to perform putEvents on eventbridge
+    role:
+      statements:
+        - Effect: Allow
+          Action: events:PutEvents
+          Resource: !GetAtt EventBus.Arn # arn gives the eventBridge resource identifier
+
+custom:
+  apiGatewayServiceProxies:
+    - eventbridge:
+        path: /eventbridge # alternative api gateway proxy for processing event. You can use this instead of processEventsLambda handler
+        method: post
+        source: "fuel-app"
+        detailType: "user-signup"
+        eventBusName: { Ref: EventBus }
+        cors: true
+
+functions:
+  putEventsLambda: # responsible for adding events to eventbridge
+    handler: functions/putEvents.handler
+    environment: # this makes environment variables available in lambda handler function
+      EventBusName: !Ref EventBus
+    events: # this creates api gateway
+      - http:
+          path: /generate
+          method: post
+  processEventsLambda: # responsible for processing the event messages from sqs queue in batches
+    handler: functions/processEvent.handler
+    events:
+      - sqs:
+          arn: !GetAtt TargetSQS.Arn
+          batchSize: 10 # if there are many messages in queue then 10 messages will be polled from queue to process by lambda function
+          functionResponseType: "ReportBatchItemFailures" # failure response while processing the batch messages
+
+resources:
+  # here in Resources we defined code to create the aws resources that we need for our application
+  Resources: ${file(resources.yml)}
+  Outputs:
+    EventBusName:
+      Value: !Ref EventBus # this will return the eventbus name which is QR_EVENT_BUS
+
+# this plugin helps to call event bridge directly from api gateway without any need for lambda function
+plugins:
+  - serverless-apigateway-service-proxy

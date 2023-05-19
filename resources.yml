@@ -1,0 +1,48 @@
+# create eventbus by using eventbridge service
+EventBus: # this is a logical name for aws resource(we can give any name)
+  Type: AWS::Events::EventBus # with this the code will create am EventBus resource
+  Properties:
+    Name: QR_EVENT_BUS # this is the name of a eventBus that we have defined(we can give any name)
+
+# creating a sqs
+TargetSQS:
+  Type: AWS::SQS::Queue
+  Properties:
+    QueueName: QR_MESSAGE_QUEUE
+    RedrivePolicy: # for dead letter queue
+      deadLetterTargetArn: !GetAtt TargetDLQ.Arn
+      maxReceiveCount: 1 # if a message is not processed by lambda then it will come back to sqs one time for reprocessing and if again the processing fails then that message will be sent to dead letter queue
+
+TargetDLQ:
+  Type: AWS::SQS::Queue
+  Properties:
+    QueueName: QR_MESSAGE_DLQ
+
+# defining the target of event to be sqs
+TargetSQSRule:
+  Type: AWS::Events::Rule
+  Properties:
+    EventBusName: !GetAtt EventBus.Arn
+    EventPattern:
+      source:
+        - "fuel-app"
+      detail-type:
+        - "user-signup"
+    Targets:
+      - Arn: !GetAtt TargetSQS.Arn
+        Id: qr-event-bus-target-sqs-${sls:stage}
+
+# giving sqs permission to access event
+TargetSQSPolicy:
+  Type: AWS::SQS::QueuePolicy
+  Properties:
+    Queues:
+      - !Ref TargetSQS # this will give queue url
+    PolicyDocument:
+      Statement:
+        - Effect: "Allow"
+          Action:
+            - "SQS:SendMessage"
+          Resource: !GetAtt TargetSQS.Arn
+          Principal:
+            Service: events.amazonaws.com
